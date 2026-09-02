@@ -22,10 +22,14 @@ STOCKS = [
 
 def send_telegram_alert(message):
     """Telegram पर अलर्ट भेजने का फ़ंक्शन"""
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Telegram Credentials Missing!")
+        return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {'chat_id': TELEGRAM_CHAT_ID, 'text': message, 'parse_mode': 'Markdown'}
     try:
-        requests.post(url, data=payload)
+        r = requests.post(url, data=payload)
+        print("Telegram Status:", r.status_code, r.text)
     except Exception as e:
         print(f"Telegram error: {e}")
 
@@ -55,19 +59,19 @@ def scan_stock(ticker):
         df_m = stock.history(period="2y", interval="1mo")
         df_w = stock.history(period="1y", interval="1wk")
         df_d = stock.history(period="6mo", interval="1d")
-        df_125m = stock.history(period="1mo", interval="60m") # 125m proxy via 60m
+        df_125m = stock.history(period="1mo", interval="60m")
         df_15m = stock.history(period="7d", interval="15m")
 
-        # ट्रेंड अलाइनमेंट: Monthly, Weekly, 125-Min, और 15-Min पर Trend UP होना चाहिए
+        # ट्रेंड अलाइनमेंट
         trend_m = check_trend_up(df_m)
         trend_w = check_trend_up(df_w)
         trend_125 = check_trend_up(df_125m)
         trend_15 = check_trend_up(df_15m)
 
         if not (trend_m and trend_w and trend_125 and trend_15):
-            return None # अगर कोई एक भी ट्रेंड Up नहीं है, तो तुरंत रिजेक्ट करें
+            return None
 
-        # 2. Daily Chart Demand Zone Requirement
+        # 2. Daily Chart Demand Zone Check
         if df_d.empty or len(df_d) < 10:
             return None
 
@@ -75,31 +79,25 @@ def scan_stock(ticker):
         stock_name = ticker.replace('.NS', '')
         latest_close = float(df_d['Close'].iloc[-1])
 
-        # रूल: लाइव कैंडल से 3-4 कैंडल पीछे ही डिमांड ज़ोन होना चाहिए
-        # idx = total_candles - 5 (Leg-In), idx+1 = Base (1 Single Base), idx+2 = Leg-Out
+        # लाइव कैंडल से 3-4 कैंडल पीछे का दायरा
         for idx in range(total_candles - 5, total_candles - 3):
             leg_in = df_d.iloc[idx]
-            base = df_d.iloc[idx + 1]       # केवल 1 सिंगल बेस कैंडल
+            base = df_d.iloc[idx + 1]       # केवल 1 बेस कैंडल
             leg_out = df_d.iloc[idx + 2]
 
             body_leg_in, wick_leg_in = analyze_candle(leg_in)
             body_base, wick_base = analyze_candle(base)
             body_leg_out, wick_leg_out = analyze_candle(leg_out)
 
-            # Strict Candle Criteria Check:
-            # 1. Leg-In: Body >= 85-90%
-            # 2. Base: Body <= 30%, Wick >= 70% (Single Base Candle)
-            # 3. Leg-Out: Body >= 85-90% (Green Candle)
             is_leg_in_valid = (body_leg_in >= 85.0)
-            is_single_base_valid = (body_base <= 30.0 and wick_base >= 70.0)
+            is_single_base_valid = (body_base <= 35.0 and wick_base >= 65.0)
             is_leg_out_valid = (body_leg_out >= 85.0 and leg_out['Close'] > leg_out['Open'])
 
             if is_leg_in_valid and is_single_base_valid and is_leg_out_valid:
                 zone_low = float(base['Low'])
                 zone_high = float(base['High'])
                 
-                # 3. Freshness Check (क्या प्राइस बनने के बाद वापस ज़ोन तोड़ चुका है?)
-                # Leg-Out बनने के बाद से लेकर लाइव कैंडल तक प्राइस ज़ोन के नीचे नहीं गया होना चाहिए
+                # Freshness Check
                 post_zone_candles = df_d.iloc[idx + 3:]
                 is_fresh = True
                 for _, row in post_zone_candles.iterrows():
@@ -135,8 +133,9 @@ def main():
         for msg in found_alerts:
             send_telegram_alert(msg)
     else:
-        print("No stocks matched the strict single-base fresh demand zone criteria today.")
-        send_telegram_alert("⚙️ *Scanner Update:* Today, no stocks matched all strict Daily Zone (Single Base) & MTF Trend criteria.")
+        print("No stocks matched strict criteria today.")
+        # यह मैसेज हमेशा टेलीग्राम पर जाएगा ताकि आपको पता चल सके कि बोट काम कर रहा है
+        send_telegram_alert("✅ *Scanner Executed Successfully!*\n\nआज के दिन दिए गए strict नियमों (1 Base Candle, Daily Fresh Zone, MTF Up Trend) पर कोई भी स्टॉक मैच नहीं हुआ है। स्कैनर सही से एक्टिव है।")
 
 if __name__ == "__main__":
     main()
