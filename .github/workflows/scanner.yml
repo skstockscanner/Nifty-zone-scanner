@@ -1,11 +1,10 @@
 
-name: Maximum Usage Stock Scanner (1900 Min Target)
+name: Pure Price Action Stock Scanner
 
 on:
   schedule:
-    # सोमवार से शुक्रवार तक हर 16 मिनट में 24 घंटे चलेगा
     - cron: '*/16 * * * 1-5'
-  workflow_dispatch: # जरूरत पड़ने पर मैन्युअल चलाने के लिए
+  workflow_dispatch:
 
 jobs:
   run-scanner:
@@ -23,7 +22,7 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install requests pandas yfinance ta
+        pip install requests pandas yfinance numpy
 
     - name: Run Scanner Script
       env:
