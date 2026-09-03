@@ -5,7 +5,7 @@ import numpy as np
 import yfinance as yf
 from datetime import datetime
 
-TOKEN = os.getenv('TELEGRAM_TOKEN')
+TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 def send_telegram_alert(message):
