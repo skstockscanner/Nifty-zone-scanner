@@ -20,16 +20,6 @@ def send_telegram_alert(message):
     except Exception as e:
         print("Error sending Telegram message:", e)
 
-def get_trend(df):
-    if len(df) < 20:
-        return "UNKNOWN"
-    df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
-    if df['Close'].iloc[-1] > df['EMA20'].iloc[-1] and df['Close'].iloc[-2] > df['EMA20'].iloc[-2]:
-        return "UP"
-    elif df['Close'].iloc[-1] < df['EMA20'].iloc[-1] and df['Close'].iloc[-2] < df['EMA20'].iloc[-2]:
-        return "DOWN"
-    return "SIDEWAYS"
-
 def analyze_candle(open_p, high_p, low_p, close_p):
     total_range = high_p - low_p
     if total_range == 0:
@@ -43,123 +33,126 @@ def scan_stock(symbol, name):
     try:
         ticker = yf.Ticker(symbol)
         
-        df_weekly = ticker.history(period="1y", interval="1wk")
-        df_daily = ticker.history(period="6m", interval="1d")
-        df_15m = ticker.history(period="1mo", interval="15m")
+        df_daily = ticker.history(period="3m", interval="1d")
+        df_15m = ticker.history(period="5d", interval="15m")
 
-        if df_weekly.empty or df_daily.empty or df_15m.empty:
+        if df_daily.empty or df_15m.empty or len(df_daily) < 5 or len(df_15m) < 5:
             return False
 
-        df_125m = df_15m.resample('125min').agg({
-            'Open': 'first',
-            'High': 'max',
-            'Low': 'min',
-            'Close': 'last',
-            'Volume': 'sum'
-        }).dropna()
-
-        weekly_trend = get_trend(df_weekly)
-        daily_trend = get_trend(df_daily)
-        trend_125m = get_trend(df_125m)
         current_price = df_daily['Close'].iloc[-1]
-
         triggered = False
 
         # =========================================================
-        # 1. DEMAND ZONE CHECK (BULLISH SETUP)
+        # 1. PURE DEMAND ZONE CHECK (BULLISH)
         # =========================================================
-        if weekly_trend == "UP" and daily_trend == "UP" and trend_125m == "UP":
-            daily_dz_found = False
-            dz_high, dz_low = 0, 0
+        daily_dz_found = False
+        dz_high, dz_low = 0, 0
 
-            for i in range(3, 6):
-                if len(df_daily) < i+1:
-                    break
-                o, h, l, c = df_daily['Open'].iloc[-i], df_daily['High'].iloc[-i], df_daily['Low'].iloc[-i], df_daily['Close'].iloc[-i]
-                b_pct, _ = analyze_candle(o, h, l, c)
+        # Daily Zone: 3 or 4 candles back
+        for i in range(3, 5):
+            o, h, l, c = df_daily['Open'].iloc[-i], df_daily['High'].iloc[-i], df_daily['Low'].iloc[-i], df_daily['Close'].iloc[-i]
+            b_pct, w_pct = analyze_candle(o, h, l, c)
+            
+            out_o, out_h, out_l, out_c = df_daily['Open'].iloc[-i+1], df_daily['High'].iloc[-i+1], df_daily['Low'].iloc[-i+1], df_daily['Close'].iloc[-i+1]
+            out_b, out_w = analyze_candle(out_o, out_h, out_l, out_c)
+
+            # Base candle body <= 30%, wick >= 70% AND Leg-out green body >= 90%, wick <= 10%
+            if b_pct <= 30 and w_pct >= 70 and out_b >= 90 and out_w <= 10 and out_c > out_o:
+                daily_dz_found = True
+                dz_high, dz_low = h, l
+                break
+
+        if daily_dz_found and (dz_low <= current_price <= dz_high * 1.01):
+            # 15-Min Execution: Check 1 or 2 candles back near daily zone
+            for j in range(1, 3):
+                idx = -j
+                if abs(len(df_15m) + idx) < 3:
+                    continue
                 
-                out_o, out_h, out_l, out_c = df_daily['Open'].iloc[-i+1], df_daily['High'].iloc[-i+1], df_daily['Low'].iloc[-i+1], df_daily['Close'].iloc[-i+1]
-                out_b_pct, _ = analyze_candle(out_o, out_h, out_l, out_c)
+                in_o, in_h, in_l, in_c = df_15m['Open'].iloc[idx-2], df_15m['High'].iloc[idx-2], df_15m['Low'].iloc[idx-2], df_15m['Close'].iloc[idx-2]
+                b_in, w_in = analyze_candle(in_o, in_h, in_l, in_c)
 
-                # Base Body <= 40% & Leg-out Green Candle >= 60%
-                if b_pct <= 40 and out_b_pct >= 60 and out_c > out_o:
-                    daily_dz_found = True
-                    dz_high, dz_low = h, l
-                    break
+                base_o, base_h, base_l, base_c = df_15m['Open'].iloc[idx-1], df_15m['High'].iloc[idx-1], df_15m['Low'].iloc[idx-1], df_15m['Close'].iloc[idx-1]
+                b_base, w_base = analyze_candle(base_o, base_h, base_l, base_c)
 
-            if daily_dz_found and (dz_low <= current_price <= dz_high * 1.005):
-                leg_in_b, leg_in_w = analyze_candle(df_15m['Open'].iloc[-3], df_15m['High'].iloc[-3], df_15m['Low'].iloc[-3], df_15m['Close'].iloc[-3])
-                base_b, base_w = analyze_candle(df_15m['Open'].iloc[-2], df_15m['High'].iloc[-2], df_15m['Low'].iloc[-2], df_15m['Close'].iloc[-2])
-                leg_out_b, leg_out_w = analyze_candle(df_15m['Open'].iloc[-1], df_15m['High'].iloc[-1], df_15m['Low'].iloc[-1], df_15m['Close'].iloc[-1])
+                out_o1, out_h1, out_l1, out_c1 = df_15m['Open'].iloc[idx], df_15m['High'].iloc[idx], df_15m['Low'].iloc[idx], df_15m['Close'].iloc[idx]
+                b_out, w_out = analyze_candle(out_o1, out_h1, out_l1, out_c1)
 
-                valid_in = leg_in_b >= 85 and leg_in_w <= 15
-                valid_base = base_b <= 35 and base_w >= 65
-                valid_out = leg_out_b >= 75 and leg_out_w <= 20 and df_15m['Close'].iloc[-1] > df_15m['Open'].iloc[-1]
+                # Rules: Leg-in (>=90% body, <=10% wick), Base (<=30% body, >=70% wick), Leg-out Green (>=90% body, <=10% wick)
+                valid_in = b_in >= 90 and w_in <= 10
+                valid_base = b_base <= 30 and w_base >= 70
+                valid_out = b_out >= 90 and w_out <= 10 and out_c1 > out_o1
 
                 if valid_in and valid_base and valid_out:
                     msg = (
-                        f"🔥 *DEMAND ZONE TRIGGER: {name} ({symbol})* 🔥\n\n"
-                        f"📈 **Weekly Trend:** {weekly_trend}\n"
-                        f"📈 **Daily Trend:** {daily_trend}\n"
-                        f"📈 **125m Trend:** {trend_125m}\n\n"
+                        f"🔥 *PURE DEMAND ZONE TRIGGER: {name} ({symbol})* 🔥\n\n"
                         f"📍 **Daily Demand Zone:** {round(dz_low, 2)} - {round(dz_high, 2)}\n"
-                        f"⚡ **15-Min Candle Structure:**\n"
-                        f"• Leg-in Body: {round(leg_in_b, 1)}%\n"
-                        f"• Base Body: {round(base_b, 1)}%\n"
-                        f"• Leg-out Body (Green): {round(leg_out_b, 1)}%\n\n"
+                        f"⚡ **15-Min Structure Matched:**\n"
+                        f"• Leg-in Body: {round(b_in, 1)}% (Wick: {round(w_in, 1)}%)\n"
+                        f"• Base Body: {round(b_base, 1)}% (Wick: {round(w_base, 1)}%)\n"
+                        f"• Leg-out Body (Green): {round(b_out, 1)}% (Wick: {round(w_out, 1)}%)\n\n"
                         f"🎯 **Current Price:** ₹{round(current_price, 2)}\n"
-                        "✅ *Bullish Demand Zone Matched!*"
+                        "✅ *Pure Price Action Setup Complete!*"
                     )
                     send_telegram_alert(msg)
                     triggered = True
-
-        # =========================================================
-        # 2. SUPPLY ZONE CHECK (BEARISH SETUP)
-        # =========================================================
-        if weekly_trend == "DOWN" and daily_trend == "DOWN" and trend_125m == "DOWN":
-            daily_sz_found = False
-            sz_high, sz_low = 0, 0
-
-            for i in range(3, 6):
-                if len(df_daily) < i+1:
                     break
-                o, h, l, c = df_daily['Open'].iloc[-i], df_daily['High'].iloc[-i], df_daily['Low'].iloc[-i], df_daily['Close'].iloc[-i]
-                b_pct, _ = analyze_candle(o, h, l, c)
+
+        # =========================================================
+        # 2. PURE SUPPLY ZONE CHECK (BEARISH)
+        # =========================================================
+        daily_sz_found = False
+        sz_high, sz_low = 0, 0
+
+        # Daily Zone: 3 or 4 candles back
+        for i in range(3, 5):
+            o, h, l, c = df_daily['Open'].iloc[-i], df_daily['High'].iloc[-i], df_daily['Low'].iloc[-i], df_daily['Close'].iloc[-i]
+            b_pct, w_pct = analyze_candle(o, h, l, c)
+            
+            out_o, out_h, out_l, out_c = df_daily['Open'].iloc[-i+1], df_daily['High'].iloc[-i+1], df_daily['Low'].iloc[-i+1], df_daily['Close'].iloc[-i+1]
+            out_b, out_w = analyze_candle(out_o, out_h, out_l, out_c)
+
+            # Base candle body <= 30%, wick >= 70% AND Leg-out Red body >= 90%, wick <= 10%
+            if b_pct <= 30 and w_pct >= 70 and out_b >= 90 and out_w <= 10 and out_c < out_o:
+                daily_sz_found = True
+                sz_high, sz_low = h, l
+                break
+
+        if daily_sz_found and (sz_low * 0.99 <= current_price <= sz_high):
+            # 15-Min Execution: Check 1 or 2 candles back near daily zone
+            for j in range(1, 3):
+                idx = -j
+                if abs(len(df_15m) + idx) < 3:
+                    continue
                 
-                out_o, out_h, out_l, out_c = df_daily['Open'].iloc[-i+1], df_daily['High'].iloc[-i+1], df_daily['Low'].iloc[-i+1], df_daily['Close'].iloc[-i+1]
-                out_b_pct, _ = analyze_candle(out_o, out_h, out_l, out_c)
+                in_o, in_h, in_l, in_c = df_15m['Open'].iloc[idx-2], df_15m['High'].iloc[idx-2], df_15m['Low'].iloc[idx-2], df_15m['Close'].iloc[idx-2]
+                b_in, w_in = analyze_candle(in_o, in_h, in_l, in_c)
 
-                # Base Body <= 40% & Leg-out Red Candle >= 60%
-                if b_pct <= 40 and out_b_pct >= 60 and out_c < out_o:
-                    daily_sz_found = True
-                    sz_high, sz_low = h, l
-                    break
+                base_o, base_h, base_l, base_c = df_15m['Open'].iloc[idx-1], df_15m['High'].iloc[idx-1], df_15m['Low'].iloc[idx-1], df_15m['Close'].iloc[idx-1]
+                b_base, w_base = analyze_candle(base_o, base_h, base_l, base_c)
 
-            if daily_sz_found and (sz_low * 0.995 <= current_price <= sz_high):
-                leg_in_b, leg_in_w = analyze_candle(df_15m['Open'].iloc[-3], df_15m['High'].iloc[-3], df_15m['Low'].iloc[-3], df_15m['Close'].iloc[-3])
-                base_b, base_w = analyze_candle(df_15m['Open'].iloc[-2], df_15m['High'].iloc[-2], df_15m['Low'].iloc[-2], df_15m['Close'].iloc[-2])
-                leg_out_b, leg_out_w = analyze_candle(df_15m['Open'].iloc[-1], df_15m['High'].iloc[-1], df_15m['Low'].iloc[-1], df_15m['Close'].iloc[-1])
+                out_o1, out_h1, out_l1, out_c1 = df_15m['Open'].iloc[idx], df_15m['High'].iloc[idx], df_15m['Low'].iloc[idx], df_15m['Close'].iloc[idx]
+                b_out, w_out = analyze_candle(out_o1, out_h1, out_l1, out_c1)
 
-                valid_in = leg_in_b >= 85 and leg_in_w <= 15
-                valid_base = base_b <= 35 and base_w >= 65
-                valid_out = leg_out_b >= 75 and leg_out_w <= 20 and df_15m['Close'].iloc[-1] < df_15m['Open'].iloc[-1] # Red Leg-out
+                # Rules: Leg-in (>=90% body, <=10% wick), Base (<=30% body, >=70% wick), Leg-out Red (>=90% body, <=10% wick)
+                valid_in = b_in >= 90 and w_in <= 10
+                valid_base = b_base <= 30 and w_base >= 70
+                valid_out = b_out >= 90 and w_out <= 10 and out_c1 < out_o1
 
                 if valid_in and valid_base and valid_out:
                     msg = (
-                        f"🔻 *SUPPLY ZONE TRIGGER: {name} ({symbol})* 🔻\n\n"
-                        f"📉 **Weekly Trend:** {weekly_trend}\n"
-                        f"📉 **Daily Trend:** {daily_trend}\n"
-                        f"📉 **125m Trend:** {trend_125m}\n\n"
+                        f"🔻 *PURE SUPPLY ZONE TRIGGER: {name} ({symbol})* 🔻\n\n"
                         f"📍 **Daily Supply Zone:** {round(sz_low, 2)} - {round(sz_high, 2)}\n"
-                        f"⚡ **15-Min Candle Structure:**\n"
-                        f"• Leg-in Body: {round(leg_in_b, 1)}%\n"
-                        f"• Base Body: {round(base_b, 1)}%\n"
-                        f"• Leg-out Body (Red): {round(leg_out_b, 1)}%\n\n"
+                        f"⚡ **15-Min Structure Matched:**\n"
+                        f"• Leg-in Body: {round(b_in, 1)}% (Wick: {round(w_in, 1)}%)\n"
+                        f"• Base Body: {round(b_base, 1)}% (Wick: {round(w_base, 1)}%)\n"
+                        f"• Leg-out Body (Red): {round(b_out, 1)}% (Wick: {round(w_out, 1)}%)\n\n"
                         f"🎯 **Current Price:** ₹{round(current_price, 2)}\n"
-                        "✅ *Bearish Supply Zone Matched!*"
+                        "✅ *Pure Price Action Setup Complete!*"
                     )
                     send_telegram_alert(msg)
                     triggered = True
+                    break
 
         return triggered
 
@@ -169,7 +162,6 @@ def scan_stock(symbol, name):
 
 def main():
     watchlist = {
-        "^NSEI": "NIFTY 50 INDEX",
         "RELIANCE.NS": "Reliance Industries", "TCS.NS": "TCS", "HDFCBANK.NS": "HDFC Bank",
         "ICICIBANK.NS": "ICICI Bank", "INFY.NS": "Infosys", "BHARTIARTL.NS": "Bharti Airtel",
         "ITC.NS": "ITC", "SBIN.NS": "State Bank of India", "LTIM.NS": "LTIMindtree",
@@ -244,7 +236,7 @@ def main():
         "FINPIPE.NS": "Finolex Pipes", "FINCABLES.NS": "Finolex Cables", "ROUTE.NS": "Route Mobile"
     }
 
-    print("Starting Dual Scan (Demand + Supply) for 250+ Stocks...")
+    print("Starting Pure Action Zone Scan (No EMA)...")
     total_scanned = len(watchlist)
     matched_count = 0
 
@@ -253,11 +245,10 @@ def main():
             matched_count += 1
 
     summary_msg = (
-        "🤖 *DEMAND & SUPPLY SCANNER COMPLETED!*\n\n"
-        "✅ **250 स्टॉक्स का डुअल स्कैन पूरा हुआ!**\n"
-        f"📊 **कुल स्कैन किए गए स्टॉक्स:** {total_scanned}\n"
-        f"🎯 **ट्रिगर हुए कुल सेटअप:** {matched_count}\n\n"
-        "🟢 *आपका बोट अब तेजी (Demand) और मंदी (Supply) दोनों को स्कैन कर रहा है!*"
+        "🤖 *PURE PRICE ACTION SCANNER COMPLETED!*\n\n"
+        f"📊 **Scanned Stocks:** {total_scanned}\n"
+        f"🎯 **Triggered Setups:** {matched_count}\n\n"
+        "✅ *No EMA, Only Pure Daily & 15-Min Zone Match!*"
     )
     send_telegram_alert(summary_msg)
 
