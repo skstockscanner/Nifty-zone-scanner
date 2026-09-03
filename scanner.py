@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 import numpy as np
 import yfinance as yf
+from datetime import datetime
 
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
@@ -48,7 +49,7 @@ def scan_stock(symbol, name):
         df_15m = ticker.history(period="1mo", interval="15m")
 
         if df_weekly.empty or df_daily.empty or df_15m.empty:
-            return
+            return False
 
         df_125m = df_15m.resample('125min').agg({
             'Open': 'first',
@@ -64,7 +65,7 @@ def scan_stock(symbol, name):
         trend_125m = get_trend(df_125m)
 
         if not (weekly_trend == "UP" and daily_trend == "UP" and trend_125m == "UP"):
-            return
+            return False
 
         # 2. Daily Demand Zone Check (3 to 5 candles back)
         daily_demand_zone_found = False
@@ -90,7 +91,7 @@ def scan_stock(symbol, name):
         is_in_daily_zone = daily_demand_zone_found and (daily_zone_low <= current_price <= daily_zone_high * 1.005)
 
         if not is_in_daily_zone:
-            return
+            return False
 
         # 3. 15-Min Execution Check
         leg_in_b, leg_in_w = analyze_candle(df_15m['Open'].iloc[-3], df_15m['High'].iloc[-3], df_15m['Low'].iloc[-3], df_15m['Close'].iloc[-3])
@@ -116,12 +117,14 @@ def scan_stock(symbol, name):
                 "✅ *Large/Mid Cap Setup Matched!*"
             )
             send_telegram_alert(msg)
+            return True
 
     except Exception as e:
         print(f"Error scanning {symbol}: {e}")
+    
+    return False
 
 def main():
-    # Large-Cap & Top Mid-Cap Stock List (NSE)
     watchlist = {
         "^NSEI": "NIFTY 50 INDEX",
         "RELIANCE.NS": "Reliance Industries",
@@ -148,20 +151,34 @@ def main():
         "POWERGRID.NS": "Power Grid",
         "M&M.NS": "Mahindra & Mahindra",
         "ULTRACEMCO.NS": "UltraTech Cement",
-        "PERSISTENT.NS": "Persistent Systems (Midcap)",
-        "COFORGE.NS": "Coforge (Midcap)",
-        "POLYCAB.NS": "Polycab India (Midcap)",
-        "DIXON.NS": "Dixon Technologies (Midcap)",
-        "TRENT.NS": "Trent (Midcap/Largecap)",
+        "PERSISTENT.NS": "Persistent Systems",
+        "COFORGE.NS": "Coforge",
+        "POLYCAB.NS": "Polycab India",
+        "DIXON.NS": "Dixon Technologies",
+        "TRENT.NS": "Trent",
         "BEL.NS": "Bharat Electronics",
         "HAL.NS": "Hindustan Aeronautics",
-        "VOLTAS.NS": "Voltas (Midcap)",
-        "AUROPHARMA.NS": "Aurobindo Pharma (Midcap)"
+        "VOLTAS.NS": "Voltas",
+        "AUROPHARMA.NS": "Aurobindo Pharma"
     }
 
     print("Starting Scan for Large & Mid Cap Stocks...")
+    total_scanned = len(watchlist)
+    matched_count = 0
+
     for symbol, name in watchlist.items():
-        scan_stock(symbol, name)
+        if scan_stock(symbol, name):
+            matched_count += 1
+
+    # ✅ कन्फर्मेशन समरी मैसेज (यह मैसेज हर हाल में टेलीग्राम पर आएगा)
+    summary_msg = (
+        "🤖 *ZONE SCANNER COMPLETED!*\n\n"
+        "✅ **स्कैन सफलतापूर्वक पूरा हो गया है।**\n"
+        f"📊 **कुल स्कैन किए गए स्टॉक्स:** {total_scanned}\n"
+        f"🎯 **शर्तों से मैच हुए स्टॉक्स:** {matched_count}\n\n"
+        "🟢 *आपका ऑटोमैटिक बोट सक्रिय (Active) है और सही काम कर रहा है!*"
+    )
+    send_telegram_alert(summary_msg)
 
 if __name__ == "__main__":
     main()
