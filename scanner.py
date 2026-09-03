@@ -8,6 +8,9 @@ TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 def send_telegram_alert(message):
+    if not TOKEN or not CHAT_ID:
+        print("Error: Telegram Token or Chat ID is missing!")
+        return
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {
         "chat_id": CHAT_ID,
@@ -151,9 +154,8 @@ def scan_stock(symbol, name):
         return False
 
 def main():
-    # सबसे पहले यह टेस्ट मैसेज भेजेगा ताकि पता चले Telegram कनेक्ट है या नहीं
-    print("Sending Connection Test Message...")
-    send_telegram_alert("🟢 *Scanner Started Successfully!* \n\nTelegram connection is working fine. Now scanning stocks...")
+    print("Starting Connection & Confirmation Test...")
+    send_telegram_alert("🟢 *Scanner Started Successfully!* \n\nConnection is working fine. Scanning stocks now...")
 
     watchlist = {
         "RELIANCE.NS": "Reliance Industries", "TCS.NS": "TCS", "HDFCBANK.NS": "HDFC Bank",
@@ -241,7 +243,7 @@ def main():
         "🤖 *PURE PRICE ACTION SCANNER COMPLETED!*\n\n"
         f"📊 **Scanned Stocks:** {total_scanned}\n"
         f"🎯 **Triggered Setups:** {matched_count}\n\n"
-        "✅ *Scan finished successfully without any EMA.*"
+        "✅ *Scan finished successfully.*"
     )
     send_telegram_alert(summary_msg)
 
