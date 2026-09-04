@@ -84,21 +84,16 @@ def scan_stock(symbol, name):
                     zone_high, zone_low = h, l
                     break
 
-            if daily_demand_found and (zone_low <= current_price <= zone_high * 1.005):
-                leg_in_b, _ = analyze_candle(df_15m['Open'].iloc[-3], df_15m['High'].iloc[-3], df_15m['Low'].iloc[-3], df_15m['Close'].iloc[-3])
-                base_b, _ = analyze_candle(df_15m['Open'].iloc[-2], df_15m['High'].iloc[-2], df_15m['Low'].iloc[-2], df_15m['Close'].iloc[-2])
-                leg_out_b, _ = analyze_candle(df_15m['Open'].iloc[-1], df_15m['High'].iloc[-1], df_15m['Low'].iloc[-1], df_15m['Close'].iloc[-1])
-
-                if leg_in_b >= 80 and base_b <= 35 and leg_out_b >= 75 and df_15m['Close'].iloc[-1] > df_15m['Open'].iloc[-1]:
-                    msg = (
-                        f"🟢 *DEMAND ZONE (BUY) TRIGGER: {name} ({symbol})* 🟢\n\n"
-                        f"📈 **Trends:** Weekly({weekly_trend}) | Daily({daily_trend}) | 125m({trend_125m})\n"
-                        f"📍 **Demand Zone:** {round(zone_low, 2)} - {round(zone_high, 2)}\n"
-                        f"⚡ **15m Structure:** Leg-in({round(leg_in_b,1)}%) | Base({round(base_b,1)}%) | Leg-out({round(leg_out_b,1)}%)\n"
-                        f"🎯 **Current Price:** ₹{round(current_price, 2)}\n"
-                    )
-                    send_telegram_alert(msg)
-                    return True
+            # करंट प्राइस की शर्त यहाँ से पूरी तरह हटा दी गई है
+            if daily_demand_found:
+                msg = (
+                    f"🟢 *DEMAND ZONE (BUY) TRIGGER: {name} ({symbol})* 🟢\n\n"
+                    f"📈 **Trends:** Weekly({weekly_trend}) | Daily({daily_trend}) | 125m({trend_125m})\n"
+                    f"📍 **Demand Zone:** {round(zone_low, 2)} - {round(zone_high, 2)}\n"
+                    f"🎯 **Current Price:** ₹{round(current_price, 2)}\n"
+                )
+                send_telegram_alert(msg)
+                return True
 
         # ==========================================
         # 2. SUPPLY ZONE SCANNING (SELL SETUP)
@@ -121,21 +116,16 @@ def scan_stock(symbol, name):
                     s_zone_high, s_zone_low = h, l
                     break
 
-            if daily_supply_found and (s_zone_low * 0.995 <= current_price <= s_zone_high):
-                leg_in_b, _ = analyze_candle(df_15m['Open'].iloc[-3], df_15m['High'].iloc[-3], df_15m['Low'].iloc[-3], df_15m['Close'].iloc[-3])
-                base_b, _ = analyze_candle(df_15m['Open'].iloc[-2], df_15m['High'].iloc[-2], df_15m['Low'].iloc[-2], df_15m['Close'].iloc[-2])
-                leg_out_b, _ = analyze_candle(df_15m['Open'].iloc[-1], df_15m['High'].iloc[-1], df_15m['Low'].iloc[-1], df_15m['Close'].iloc[-1])
-
-                if leg_in_b >= 80 and base_b <= 35 and leg_out_b >= 75 and df_15m['Close'].iloc[-1] < df_15m['Open'].iloc[-1]:
-                    msg = (
-                        f"🔴 *SUPPLY ZONE (SELL) TRIGGER: {name} ({symbol})* 🔴\n\n"
-                        f"📉 **Trends:** Weekly({weekly_trend}) | Daily({daily_trend}) | 125m({trend_125m})\n"
-                        f"📍 **Supply Zone:** {round(s_zone_low, 2)} - {round(s_zone_high, 2)}\n"
-                        f"⚡ **15m Structure:** Leg-in({round(leg_in_b,1)}%) | Base({round(base_b,1)}%) | Leg-out({round(leg_out_b,1)}%)\n"
-                        f"🎯 **Current Price:** ₹{round(current_price, 2)}\n"
-                    )
-                    send_telegram_alert(msg)
-                    return True
+            # करंट प्राइस की शर्त यहाँ से भी पूरी तरह हटा दी गई है
+            if daily_supply_found:
+                msg = (
+                    f"🔴 *SUPPLY ZONE (SELL) TRIGGER: {name} ({symbol})* 🔴\n\n"
+                    f"📉 **Trends:** Weekly({weekly_trend}) | Daily({daily_trend}) | 125m({trend_125m})\n"
+                    f"📍 **Supply Zone:** {round(s_zone_low, 2)} - {round(s_zone_high, 2)}\n"
+                    f"🎯 **Current Price:** ₹{round(current_price, 2)}\n"
+                )
+                send_telegram_alert(msg)
+                return True
 
     except Exception as e:
         print(f"Error scanning {symbol}: {e}")
@@ -205,7 +195,7 @@ def main():
         "RADICO.NS": "Radico", "RAJESHEXPO.NS": "Rajesh Exports", "RALLIS.NS": "Rallis",
         "RAMCOCEM.NS": "Ramco Cements", "RATNAMANI.NS": "Ratnamani", "RAYMOND.NS": "Raymond",
         "RBLBANK.NS": "RBL Bank", "RAILTEL.NS": "RailTel", "RELAXO.NS": "Relaxo", "RITES.NS": "RITES",
-        "RVNL.NS": "RVNL", "SCHAEFFLER.NS": "Schaeffler", "SCI.NS": "SCI", "SHREECEM.NS": "Shree Cement",
+        *RVNL.NS*: "RVNL", "SCHAEFFLER.NS": "Schaeffler", "SCI.NS": "SCI", "SHREECEM.NS": "Shree Cement",
         "SKFINDIA.NS": "SKF India", "SOBHA.NS": "Sobha", "SONACOMS.NS": "Sona Coms",
         "STAR.NS": "Strides Pharma", "SUMICHEM.NS": "Sumitomo", "SUNDRMFAST.NS": "Sundram Fasteners",
         "SUNTV.NS": "Sun TV", "SUPREMEIND.NS": "Supreme Ind", "SUZLON.NS": "Suzlon",
@@ -233,7 +223,7 @@ def main():
         f"🎯 **शर्तों से मैच हुए स्टॉक्स:** {matched_count}\n\n"
         "🟢 *अब लार्ज और मिड कैप के सभी 250+ स्टॉक्स स्कैन हो चुके हैं!*"
     )
-    send_telegram_alert(summary_msg)
+    send_telegram_alert(summary_spec := summary_msg)
 
 if __name__ == "__main__":
     main()
