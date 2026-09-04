@@ -46,57 +46,35 @@ def scan_stock(symbol, name):
         
         df_weekly = ticker.history(period="1y", interval="1wk")
         df_daily = ticker.history(period="6m", interval="1d")
-        df_15m = ticker.history(period="1mo", interval="15m")
 
-        if df_weekly.empty or df_daily.empty or df_15m.empty:
+        if df_weekly.empty or df_daily.empty:
             return False
 
-        df_125m = df_15m.resample('125min').agg({
-            'Open': 'first',
-            'High': 'max',
-            'Low': 'min',
-            'Close': 'last',
-            'Volume': 'sum'
-        }).dropna()
-
         weekly_trend = get_simple_trend(df_weekly)
-        daily_trend = get_simple_trend(df_daily)
-        trend_125m = get_simple_trend(df_125m)
-        current_price = df_daily['Close'].iloc[-1]
 
         # ==========================================
         # 1. DEMAND ZONE SCANNING (BUY SETUP)
         # ==========================================
-        if weekly_trend == "UP" and daily_trend == "UP" and trend_125m == "UP":
-            daily_demand_found = False
-            zone_high, zone_low = 0, 0
-
-            for i in range(3, 6):
-                if len(df_daily) < i+1:
+        if weekly_trend == "UP":
+            for i in range(3, 5):  # 3 से 4 कैंडल पीछे
+                if len(df_daily) < i + 1:
                     break
-                o, h, l, c = df_daily['Open'].iloc[-i], df_daily['High'].iloc[-i], df_daily['Low'].iloc[-i], df_daily['Close'].iloc[-i]
-                b_pct, _ = analyze_candle(o, h, l, c)
                 
-                oo, oh, ol, oc = df_daily['Open'].iloc[-i+1], df_daily['High'].iloc[-i+1], df_daily['Low'].iloc[-i+1], df_daily['Close'].iloc[-i+1]
-                ob_pct, _ = analyze_candle(oo, oh, ol, oc)
+                # Base Candle (i index पर) -> Body <= 30%, Wick >= 70%
+                o_base, h_base, l_base, c_base = df_daily['Open'].iloc[-i], df_daily['High'].iloc[-i], df_daily['Low'].iloc[-i], df_daily['Close'].iloc[-i]
+                b_pct, w_pct = analyze_candle(o_base, h_base, l_base, c_base)
+                
+                # Leg-out / Strong Green Candle (उसके तुरंत बाद वाली कैंडल i-1 index पर) -> Body >= 90%, Wick <= 10%
+                o_leg, h_leg, l_leg, c_leg = df_daily['Open'].iloc[-i+1], df_daily['High'].iloc[-i+1], df_daily['Low'].iloc[-i+1], df_daily['Close'].iloc[-i+1]
+                leg_b_pct, leg_w_pct = analyze_candle(o_leg, h_leg, l_leg, c_leg)
 
-                if b_pct <= 40 and ob_pct >= 60 and oc > oo:
-                    daily_demand_found = True
-                    zone_high, zone_low = h, l
-                    break
-
-            if daily_demand_found and (zone_low <= current_price <= zone_high * 1.005):
-                leg_in_b, _ = analyze_candle(df_15m['Open'].iloc[-3], df_15m['High'].iloc[-3], df_15m['Low'].iloc[-3], df_15m['Close'].iloc[-3])
-                base_b, _ = analyze_candle(df_15m['Open'].iloc[-2], df_15m['High'].iloc[-2], df_15m['Low'].iloc[-2], df_15m['Close'].iloc[-2])
-                leg_out_b, _ = analyze_candle(df_15m['Open'].iloc[-1], df_15m['High'].iloc[-1], df_15m['Low'].iloc[-1], df_15m['Close'].iloc[-1])
-
-                if leg_in_b >= 80 and base_b <= 35 and leg_out_b >= 75 and df_15m['Close'].iloc[-1] > df_15m['Open'].iloc[-1]:
+                if b_pct <= 30 and w_pct >= 70 and leg_b_pct >= 90 and leg_w_pct <= 10 and c_leg > o_leg:
+                    zone_high, zone_low = h_base, l_base
                     msg = (
-                        f"🟢 *DEMAND ZONE (BUY) TRIGGER: {name} ({symbol})* 🟢\n\n"
-                        f"📈 **Trends:** Weekly({weekly_trend}) | Daily({daily_trend}) | 125m({trend_125m})\n"
-                        f"📍 **Demand Zone:** {round(zone_low, 2)} - {round(zone_high, 2)}\n"
-                        f"⚡ **15m Structure:** Leg-in({round(leg_in_b,1)}%) | Base({round(base_b,1)}%) | Leg-out({round(leg_out_b,1)}%)\n"
-                        f"🎯 **Current Price:** ₹{round(current_price, 2)}\n"
+                        f"🟢 *DEMAND ZONE FORMED: {name} ({symbol})* 🟢\n\n"
+                        f"📈 **Weekly Trend:** {weekly_trend}\n"
+                        f"📍 **Demand Zone (3-4 Candles Back):** ₹{round(zone_low, 2)} - ₹{round(zone_high, 2)}\n"
+                        f"⏳ **Position:** {i} candles ago\n"
                     )
                     send_telegram_alert(msg)
                     return True
@@ -104,36 +82,26 @@ def scan_stock(symbol, name):
         # ==========================================
         # 2. SUPPLY ZONE SCANNING (SELL SETUP)
         # ==========================================
-        if weekly_trend == "DOWN" and daily_trend == "DOWN" and trend_125m == "DOWN":
-            daily_supply_found = False
-            s_zone_high, s_zone_low = 0, 0
-
-            for i in range(3, 5):
-                if len(df_daily) < i+1:
+        if weekly_trend == "DOWN":
+            for i in range(3, 5):  # 3 से 4 कैंडल पीछे
+                if len(df_daily) < i + 1:
                     break
-                o, h, l, c = df_daily['Open'].iloc[-i], df_daily['High'].iloc[-i], df_daily['Low'].iloc[-i], df_daily['Close'].iloc[-i]
-                b_pct, _ = analyze_candle(o, h, l, c)
                 
-                oo, oh, ol, oc = df_daily['Open'].iloc[-i+1], df_daily['High'].iloc[-i+1], df_daily['Low'].iloc[-i+1], df_daily['Close'].iloc[-i+1]
-                ob_pct, _ = analyze_candle(oo, oh, ol, oc)
+                # Base Candle (i index पर) -> Body <= 30%, Wick >= 70%
+                o_base, h_base, l_base, c_base = df_daily['Open'].iloc[-i], df_daily['High'].iloc[-i], df_daily['Low'].iloc[-i], df_daily['Close'].iloc[-i]
+                b_pct, w_pct = analyze_candle(o_base, h_base, l_base, c_base)
+                
+                # Leg-out / Strong Red Candle (उसके तुरंत बाद वाली कैंडल i-1 index पर) -> Body >= 90%, Wick <= 10%
+                o_leg, h_leg, l_leg, c_leg = df_daily['Open'].iloc[-i+1], df_daily['High'].iloc[-i+1], df_daily['Low'].iloc[-i+1], df_daily['Close'].iloc[-i+1]
+                leg_b_pct, leg_w_pct = analyze_candle(o_leg, h_leg, l_leg, c_leg)
 
-                if b_pct <= 40 and ob_pct >= 60 and oc < oo:
-                    daily_supply_found = True
-                    s_zone_high, s_zone_low = h, l
-                    break
-
-            if daily_supply_found and (s_zone_low * 0.995 <= current_price <= s_zone_high):
-                leg_in_b, _ = analyze_candle(df_15m['Open'].iloc[-3], df_15m['High'].iloc[-3], df_15m['Low'].iloc[-3], df_15m['Close'].iloc[-3])
-                base_b, _ = analyze_candle(df_15m['Open'].iloc[-2], df_15m['High'].iloc[-2], df_15m['Low'].iloc[-2], df_15m['Close'].iloc[-2])
-                leg_out_b, _ = analyze_candle(df_15m['Open'].iloc[-1], df_15m['High'].iloc[-1], df_15m['Low'].iloc[-1], df_15m['Close'].iloc[-1])
-
-                if leg_in_b >= 80 and base_b <= 35 and leg_out_b >= 75 and df_15m['Close'].iloc[-1] < df_15m['Open'].iloc[-1]:
+                if b_pct <= 30 and w_pct >= 70 and leg_b_pct >= 90 and leg_w_pct <= 10 and c_leg < o_leg:
+                    s_zone_high, s_zone_low = h_base, l_base
                     msg = (
-                        f"🔴 *SUPPLY ZONE (SELL) TRIGGER: {name} ({symbol})* 🔴\n\n"
-                        f"📉 **Trends:** Weekly({weekly_trend}) | Daily({daily_trend}) | 125m({trend_125m})\n"
-                        f"📍 **Supply Zone:** {round(s_zone_low, 2)} - {round(s_zone_high, 2)}\n"
-                        f"⚡ **15m Structure:** Leg-in({round(leg_in_b,1)}%) | Base({round(base_b,1)}%) | Leg-out({round(leg_out_b,1)}%)\n"
-                        f"🎯 **Current Price:** ₹{round(current_price, 2)}\n"
+                        f"🔴 *SUPPLY ZONE FORMED: {name} ({symbol})* 🔴\n\n"
+                        f"📉 **Weekly Trend:** {weekly_trend}\n"
+                        f"📍 **Supply Zone (3-4 Candles Back):** ₹{round(s_zone_low, 2)} - ₹{round(s_zone_high, 2)}\n"
+                        f"⏳ **Position:** {i} candles ago\n"
                     )
                     send_telegram_alert(msg)
                     return True
@@ -144,7 +112,6 @@ def scan_stock(symbol, name):
     return False
 
 def main():
-    # Large Cap & Mid Cap Full 250+ Watchlist
     watchlist = {
         "RELIANCE.NS": "Reliance Industries", "TCS.NS": "TCS", "HDFCBANK.NS": "HDFC Bank",
         "ICICIBANK.NS": "ICICI Bank", "INFY.NS": "Infosys", "BHARTIARTL.NS": "Bharti Airtel",
@@ -186,40 +153,43 @@ def main():
         "CANFINHOME.NS": "Can Fin Homes", "CARBORUNIV.NS": "Carborundum", "CASTROLIND.NS": "Castrol",
         "CEATLTD.NS": "CEAT", "CESC.NS": "CESC", "CHAMBLFERT.NS": "Chambal Fert",
         "CUMMINSIND.NS": "Cummins", "CYIENT.NS": "Cyient", "DEEPAKNTR.NS": "Deepak Nitrite",
-        "DEVYANI.NS": "Devyani", "ESCORTS.NS": "Escorts", "EXIDEIND.NS": "Exide",
-        "FEDERALBNK.NS": "Federal Bank", "FINCABLES.NS": "Finolex Cables", "FINPIPE.NS": "Finolex Ind",
-        "FORTIS.NS": "Fortis", "GLENMARK.NS": "Glenmark", "GMDC.NS": "GMDC", "GNFC.NS": "GNFC",
-        "GODREJIND.NS": "Godrej Ind", "GRANULES.NS": "Granules", "GSPL.NS": "GSPL",
-        "HAPPSTMNDS.NS": "Happiest Minds", "HINDCOPPER.NS": "Hind Copper", "HINDZINC.NS": "Hind Zinc",
-        "IDBI.NS": "IDBI Bank", "IEX.NS": "IEX", "INDHOTEL.NS": "Indian Hotels", "ITI.NS": "ITI",
-        "JBCHEPHARM.NS": "JB Chem", "JKCEMENT.NS": "JK Cement", "JKLAKSHMI.NS": "JK Lakshmi",
-        "JKPAPER.NS": "JK Paper", "JSL.NS": "Jindal Stainless", "JUSTDIAL.NS": "Just Dial",
-        "KAJARIACER.NS": "Kajaria", "KPRMILL.NS": "KPR Mill", "LALPATHLAB.NS": "Lal PathLabs",
-        "LAURUSLABS.NS": "Laurus Labs", "LICHSGFIN.NS": "LIC Housing", "LINDEINDIA.NS": "Linde India",
-        "MAPMYINDIA.NS": "MapmyIndia", "MAHSEAMLES.NS": "Mah Seamless", "MAXHEALTH.NS": "Max Health",
-        "METROPOLIS.NS": "Metropolis", "MFSL.NS": "Max Financial", "MINDACORP.NS": "Minda Corp",
-        "MRF.NS": "MRF", "MRPL.NS": "MRPL", "NATCOPHARM.NS": "Natco Pharma",
-        "NATIONALUM.NS": "National Aluminium", "NAVINFLUOR.NS": "Navin Fluorine", "NBCC.NS": "NBCC",
-        "NCC.NS": "NCC", "NHPC.NS": "NHPC", "NLCINDIA.NS": "NLC India", "NUVOCO.NS": "Nuvoco",
-        "OFSS.NS": "OFSS", "PAGEIND.NS": "Page Ind", "PCBL.NS": "PCBL", "PNCINFRA.NS": "PNC Infra",
-        "POONAWALLA.NS": "Poonawalla", "PRAJIND.NS": "Praj Ind", "PRESTIGE.NS": "Prestige",
-        "RADICO.NS": "Radico", "RAJESHEXPO.NS": "Rajesh Exports", "RALLIS.NS": "Rallis",
-        "RAMCOCEM.NS": "Ramco Cements", "RATNAMANI.NS": "Ratnamani", "RAYMOND.NS": "Raymond",
-        "RBLBANK.NS": "RBL Bank", "RAILTEL.NS": "RailTel", "RELAXO.NS": "Relaxo", "RITES.NS": "RITES",
-        "RVNL.NS": "RVNL", "SCHAEFFLER.NS": "Schaeffler", "SCI.NS": "SCI", "SHREECEM.NS": "Shree Cement",
-        "SKFINDIA.NS": "SKF India", "SOBHA.NS": "Sobha", "SONACOMS.NS": "Sona Coms",
-        "STAR.NS": "Strides Pharma", "SUMICHEM.NS": "Sumitomo", "SUNDRMFAST.NS": "Sundram Fasteners",
-        "SUNTV.NS": "Sun TV", "SUPREMEIND.NS": "Supreme Ind", "SUZLON.NS": "Suzlon",
-        "SWANENERGY.NS": "Swan Energy", "SYMPHONY.NS": "Symphony", "TANLA.NS": "Tanla",
+        "DEVYANI.NS": "Devyani",
+        "ESCORTS.NS": "Escorts Kubota", "EXIDEIND.NS": "Exide Industries",
+        "FEDERALBNK.NS": "Federal Bank", "FINCABLES.NS": "Finolex Cables", "FINPIPE.NS": "Finolex Industries",
+        "FORTIS.NS": "Fortis Healthcare", "GLENMARK.NS": "Glenmark Pharma", "GMDC.NS": "Gujarat Mineral",
+        "GNFC.NS": "GNFC", "GODREJIND.NS": "Godrej Industries", "GRANULES.NS": "Granules India",
+        "GSPL.NS": "Gujarat State Petronet", "HAPPSTMNDS.NS": "Happiest Minds", "HINDCOPPER.NS": "Hindustan Copper",
+        "HINDZINC.NS": "Hindustan Zinc", "IDBI.NS": "IDBI Bank", "IEX.NS": "Indian Energy Exchange",
+        "INDHOTEL.NS": "Indian Hotels", "ITI.NS": "ITI Ltd", "JBCHEPHARM.NS": "JB Chemicals",
+        "JKCEMENT.NS": "JK Cement", "JKLAKSHMI.NS": "JK Lakshmi Cement", "JKPAPER.NS": "JK Paper",
+        "JSL.NS": "Jindal Stainless", "JUSTDIAL.NS": "Just Dial", "KAJARIACER.NS": "Kajaria Ceramics",
+        "KPRMILL.NS": "KPR Mill", "LALPATHLAB.NS": "Dr. Lal PathLabs", "LAURUSLABS.NS": "Laurus Labs",
+        "LICHSGFIN.NS": "LIC Housing Finance", "LINDEINDIA.NS": "Linde India", "MAPMYINDIA.NS": "CE Info Systems",
+        "MAHSEAMLES.NS": "Maharashtra Seamless", "MAXHEALTH.NS": "Max Healthcare", "METROPOLIS.NS": "Metropolis Healthcare",
+        "MFSL.NS": "Max Financial", "MINDACORP.NS": "Minda Corp", "MRF.NS": "MRF",
+        "MRPL.NS": "MRPL", "NATCOPHARM.NS": "Natco Pharma", "NATIONALUM.NS": "National Aluminium",
+        "NAVINFLUOR.NS": "Navin Fluorine", "NBCC.NS": "NBCC", "NCC.NS": "NCC",
+        "NHPC.NS": "NHPC", "NLCINDIA.NS": "NLC India", "NUVOCO.NS": "Nuvoco Vistas",
+        "OFSS.NS": "Oracle Financial", "PAGEIND.NS": "Page Industries", "PCBL.NS": "PCBL",
+        "PNCINFRA.NS": "PNC Infratech", "POONAWALLA.NS": "Poonawalla Fincorp", "PRAJIND.NS": "Praj Industries",
+        "PRESTIGE.NS": "Prestige Estates", "RADICO.NS": "Radico Khaitan", "RAJESHEXPO.NS": "Rajesh Exports",
+        "RALLIS.NS": "Rallis India", "RAMCOCEM.NS": "Ramco Cements", "RATNAMANI.NS": "Ratnamani Metals",
+        "RAYMOND.NS": "Raymond", "RBLBANK.NS": "RBL Bank", "RAILTEL.NS": "RailTel Corporation",
+        "RELAXO.NS": "Relaxo Footwears", "RITES.NS": "RITES", "RVNL.NS": "Rail Vikas Nigam",
+        "SCHAEFFLER.NS": "Schaeffler India", "SCI.NS": "Shipping Corporation", "SHREECEM.NS": "Shree Cement",
+        "SKFINDIA.NS": "SKF India", "SOBHA.NS": "Sobha", "SONACOMS.NS": "Sona BLW",
+        "STAR.NS": "Strides Pharma", "SUMICHEM.NS": "Sumitomo Chemical", "SUNDRMFAST.NS": "Sundram Fasteners",
+        "SUNTV.NS": "Sun TV Network", "SUPREMEIND.NS": "Supreme Industries", "SUZLON.NS": "Suzlon Energy",
+        "SWANENERGY.NS": "Swan Energy", "SYMPHONY.NS": "Symphony", "TANLA.NS": "Tanla Platforms",
         "TATAELXSI.NS": "Tata Elxsi", "TATAPOWER.NS": "Tata Power", "THERMAX.NS": "Thermax",
-        "TIMKEN.NS": "Timken", "TORNTPOWER.NS": "Torrent Power", "TRIDENT.NS": "Trident",
-        "TTKPRESTIG.NS": "TTK Prestige", "UNIONBANK.NS": "Union Bank", "VGUARD.NS": "V-Guard",
-        "VIPIND.NS": "VIP Ind", "VTL.NS": "Vardhman Textiles", "WELSPUNLIV.NS": "Welspun Living",
-        "WHIRLPOOL.NS": "Whirlpool", "YESBANK.NS": "Yes Bank", "ZEEL.NS": "Zee Ent",
-        "ZENSARTECH.NS": "Zensar Tech", "ZYDUSLIFE.NS": "Zydus Lifesciences"
+        "TIMKEN.NS": "Timken India", "TORNTPOWER.NS": "Torrent Power", "TRIDENT.NS": "Trident",
+        "TTKPRESTIG.NS": "TTK Prestige", "UNIONBANK.NS": "Union Bank of India", "VGUARD.NS": "V-Guard Industries",
+        "VIPIND.NS": "VIP Industries", "VTL.NS": "Vardhman Textiles", "WELSPUNLIV.NS": "Welspun Living",
+        "WHIRLPOOL.NS": "Whirlpool of India", "YESBANK.NS": "Yes Bank", "ZEEL.NS": "Zee Entertainment",
+        "ZENSARTECH.NS": "Zensar Technologies", "ZYDUSLIFE.NS": "Zydus Lifesciences"
     }
 
-    print("Starting Advanced Demand & Supply Zone Scanner for Full 250+ Stocks...")
+    print("Starting Full 250+ Stock Zone Scanner...")
     total_scanned = len(watchlist)
     matched_count = 0
 
@@ -227,15 +197,13 @@ def main():
         if scan_stock(symbol, name):
             matched_count += 1
         
-        # हर स्टॉक के स्कैन के बाद 2 सेकंड का गैप
-        time.sleep(2)
+        # हर स्टॉक के स्कैन के बीच 1 सेकंड का गैप
+        time.sleep(1)
 
     summary_msg = (
-        "🤖 *DEMAND & SUPPLY SCANNER COMPLETED!*\n\n"
-        "✅ **स्कैन सफलतापूर्वक पूरा हो गया है।**\n"
+        "🤖 *ZONE SCANNER COMPLETED!*\n\n"
         f"📊 **कुल स्कैन किए गए स्टॉक्स:** {total_scanned}\n"
-        f"🎯 **शर्तों से मैच हुए स्टॉक्स:** {matched_count}\n\n"
-        "🟢 *अब लार्ज और मिड कैप के सभी 250+ स्टॉक्स स्कैन हो चुके हैं!*"
+        f"🎯 **शर्तों से मैच हुए स्टॉक्स:** {matched_count}"
     )
     send_telegram_alert(summary_msg)
 
