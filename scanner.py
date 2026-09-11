@@ -22,89 +22,69 @@ def send_telegram_alert(message):
     except Exception as e:
         print("Error sending Telegram message:", e)
 
-def get_simple_trend(df):
-    if len(df) < 5:
+def check_ma_trend(df, period=50):
+    """
+    50 कैंडल के मूविंग एवरेज (SMA) से ट्रेंड चेक करता है:
+    यदि आखिरी क्लोजिंग कीमत 50 SMA से ऊपर है -> UP
+    यदि नीचे है -> DOWN
+    """
+    if len(df) < period:
         return "SIDEWAYS"
-    if df['Close'].iloc[-1] > df['Close'].iloc[-5]:
+    
+    df['SMA50'] = df['Close'].rolling(window=period).mean()
+    
+    last_close = df['Close'].iloc[-1]
+    last_sma = df['SMA50'].iloc[-1]
+    
+    if pd.isna(last_sma):
+        return "SIDEWAYS"
+        
+    if last_close > last_sma:
         return "UP"
-    elif df['Close'].iloc[-1] < df['Close'].iloc[-5]:
+    elif last_close < last_sma:
         return "DOWN"
     return "SIDEWAYS"
-
-def analyze_candle(open_p, high_p, low_p, close_p):
-    total_range = high_p - low_p
-    if total_range == 0:
-        return 0, 100
-    body = abs(close_p - open_p)
-    body_pct = (body / total_range) * 100
-    wick_pct = 100 - body_pct
-    return body_pct, wick_pct
 
 def scan_stock(symbol, name):
     try:
         ticker = yf.Ticker(symbol)
         
-        df_weekly = ticker.history(period="1y", interval="1wk")
-        df_daily = ticker.history(period="6m", interval="1d")
+        df_weekly = ticker.history(period="2y", interval="1wk")
+        df_daily = ticker.history(period="1y", interval="1d")
 
-        if df_weekly.empty or df_daily.empty:
+        if df_weekly.empty or df_daily.empty or len(df_daily) < 55 or len(df_weekly) < 55:
             return False
 
-        weekly_trend = get_simple_trend(df_weekly)
+        daily_trend = check_ma_trend(df_daily, period=50)
+        weekly_trend = check_ma_trend(df_weekly, period=50)
 
         # ==========================================
-        # 1. DEMAND ZONE SCANNING (BUY SETUP)
+        # 1. STRONG UPTREND MATCH (Daily & Weekly both UP)
         # ==========================================
-        if weekly_trend == "UP":
-            for i in range(3, 5):  # 3 से 4 कैंडल पीछे
-                if len(df_daily) < i + 1:
-                    break
-                
-                # Base Candle (i index पर) -> Body <= 30%, Wick >= 70%
-                o_base, h_base, l_base, c_base = df_daily['Open'].iloc[-i], df_daily['High'].iloc[-i], df_daily['Low'].iloc[-i], df_daily['Close'].iloc[-i]
-                b_pct, w_pct = analyze_candle(o_base, h_base, l_base, c_base)
-                
-                # Leg-out / Strong Green Candle (उसके तुरंत बाद वाली कैंडल i-1 index पर) -> Body >= 90%, Wick <= 10%
-                o_leg, h_leg, l_leg, c_leg = df_daily['Open'].iloc[-i+1], df_daily['High'].iloc[-i+1], df_daily['Low'].iloc[-i+1], df_daily['Close'].iloc[-i+1]
-                leg_b_pct, leg_w_pct = analyze_candle(o_leg, h_leg, l_leg, c_leg)
-
-                if b_pct <= 30 and w_pct >= 70 and leg_b_pct >= 90 and leg_w_pct <= 10 and c_leg > o_leg:
-                    zone_high, zone_low = h_base, l_base
-                    msg = (
-                        f"🟢 *DEMAND ZONE FORMED: {name} ({symbol})* 🟢\n\n"
-                        f"📈 **Weekly Trend:** {weekly_trend}\n"
-                        f"📍 **Demand Zone (3-4 Candles Back):** ₹{round(zone_low, 2)} - ₹{round(zone_high, 2)}\n"
-                        f"⏳ **Position:** {i} candles ago\n"
-                    )
-                    send_telegram_alert(msg)
-                    return True
+        if daily_trend == "UP" and weekly_trend == "UP":
+            current_price = df_daily['Close'].iloc[-1]
+            msg = (
+                f"🟢 *STRONG UPTREND FOUND: {name} ({symbol})* 🟢\n\n"
+                f"📈 **Daily Trend (50 SMA):** UP\n"
+                f"📈 **Weekly Trend (50 SMA):** UP\n"
+                f"💵 **Current Price:** ₹{round(current_price, 2)}\n"
+            )
+            send_telegram_alert(msg)
+            return True
 
         # ==========================================
-        # 2. SUPPLY ZONE SCANNING (SELL SETUP)
+        # 2. STRONG DOWNTREND MATCH (Daily & Weekly both DOWN)
         # ==========================================
-        if weekly_trend == "DOWN":
-            for i in range(3, 5):  # 3 से 4 कैंडल पीछे
-                if len(df_daily) < i + 1:
-                    break
-                
-                # Base Candle (i index पर) -> Body <= 30%, Wick >= 70%
-                o_base, h_base, l_base, c_base = df_daily['Open'].iloc[-i], df_daily['High'].iloc[-i], df_daily['Low'].iloc[-i], df_daily['Close'].iloc[-i]
-                b_pct, w_pct = analyze_candle(o_base, h_base, l_base, c_base)
-                
-                # Leg-out / Strong Red Candle (उसके तुरंत बाद वाली कैंडल i-1 index पर) -> Body >= 90%, Wick <= 10%
-                o_leg, h_leg, l_leg, c_leg = df_daily['Open'].iloc[-i+1], df_daily['High'].iloc[-i+1], df_daily['Low'].iloc[-i+1], df_daily['Close'].iloc[-i+1]
-                leg_b_pct, leg_w_pct = analyze_candle(o_leg, h_leg, l_leg, c_leg)
-
-                if b_pct <= 30 and w_pct >= 70 and leg_b_pct >= 90 and leg_w_pct <= 10 and c_leg < o_leg:
-                    s_zone_high, s_zone_low = h_base, l_base
-                    msg = (
-                        f"🔴 *SUPPLY ZONE FORMED: {name} ({symbol})* 🔴\n\n"
-                        f"📉 **Weekly Trend:** {weekly_trend}\n"
-                        f"📍 **Supply Zone (3-4 Candles Back):** ₹{round(s_zone_low, 2)} - ₹{round(s_zone_high, 2)}\n"
-                        f"⏳ **Position:** {i} candles ago\n"
-                    )
-                    send_telegram_alert(msg)
-                    return True
+        elif daily_trend == "DOWN" and weekly_trend == "DOWN":
+            current_price = df_daily['Close'].iloc[-1]
+            msg = (
+                f"🔴 *STRONG DOWNTREND FOUND: {name} ({symbol})* 🔴\n\n"
+                f"📉 **Daily Trend (50 SMA):** DOWN\n"
+                f"📉 **Weekly Trend (50 SMA):** DOWN\n"
+                f"💵 **Current Price:** ₹{round(current_price, 2)}\n"
+            )
+            send_telegram_alert(msg)
+            return True
 
     except Exception as e:
         print(f"Error scanning {symbol}: {e}")
@@ -112,6 +92,7 @@ def scan_stock(symbol, name):
     return False
 
 def main():
+    # पूरी 250+ स्टॉक्स की वॉचलिस्ट
     watchlist = {
         "RELIANCE.NS": "Reliance Industries", "TCS.NS": "TCS", "HDFCBANK.NS": "HDFC Bank",
         "ICICIBANK.NS": "ICICI Bank", "INFY.NS": "Infosys", "BHARTIARTL.NS": "Bharti Airtel",
@@ -189,7 +170,7 @@ def main():
         "ZENSARTECH.NS": "Zensar Technologies", "ZYDUSLIFE.NS": "Zydus Lifesciences"
     }
 
-    print("Starting Full 250+ Stock Zone Scanner...")
+    print("Starting 50-SMA Trend Scanner for Full 250+ Watchlist...")
     total_scanned = len(watchlist)
     matched_count = 0
 
@@ -197,11 +178,10 @@ def main():
         if scan_stock(symbol, name):
             matched_count += 1
         
-        # हर स्टॉक के स्कैन के बीच 1 सेकंड का गैप
         time.sleep(1)
 
     summary_msg = (
-        "🤖 *ZONE SCANNER COMPLETED!*\n\n"
+        "🤖 *SMA TREND SCANNER COMPLETED!*\n\n"
         f"📊 **कुल स्कैन किए गए स्टॉक्स:** {total_scanned}\n"
         f"🎯 **शर्तों से मैच हुए स्टॉक्स:** {matched_count}"
     )
