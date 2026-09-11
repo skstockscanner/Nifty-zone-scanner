@@ -45,42 +45,72 @@ def check_ma_trend(df, period=50):
         return "DOWN"
     return "SIDEWAYS"
 
+def get_125min_df(ticker):
+    try:
+        # yfinance से पिछले 60 दिनों का 15m डेटा फेच करके 125-min में रेसम्पल करना
+        df_intraday = ticker.history(period="60d", interval="15m")
+        if df_intraday.empty:
+            return pd.DataFrame()
+        
+        df_125 = df_intraday.resample('125min').agg({
+            'Open': 'first',
+            'High': 'max',
+            'Low': 'min',
+            'Close': 'last',
+            'Volume': 'sum'
+        }).dropna()
+        return df_125
+    except Exception as e:
+        print(f"Error generating 125min dataframe: {e}")
+        return pd.DataFrame()
+
 def scan_stock(symbol, name):
     try:
         ticker = yf.Ticker(symbol)
         
+        # चारों टाइमफ्रेम के लिए डेटा फेच करना
+        df_monthly = ticker.history(period="5y", interval="1mo")
         df_weekly = ticker.history(period="2y", interval="1wk")
         df_daily = ticker.history(period="1y", interval="1d")
+        df_125m = get_125min_df(ticker)
 
-        if df_weekly.empty or df_daily.empty or len(df_daily) < 55 or len(df_weekly) < 55:
+        # पर्याप्त डेटा की जांच (कम से कम 50 कैंडल हर टाइमफ्रेम में होनी चाहिए)
+        if (df_monthly.empty or df_weekly.empty or df_daily.empty or df_125m.empty or
+            len(df_monthly) < 50 or len(df_weekly) < 50 or len(df_daily) < 50 or len(df_125m) < 50):
             return False
 
-        daily_trend = check_ma_trend(df_daily, period=50)
+        monthly_trend = check_ma_trend(df_monthly, period=50)
         weekly_trend = check_ma_trend(df_weekly, period=50)
+        daily_trend = check_ma_trend(df_daily, period=50)
+        trend_125m = check_ma_trend(df_125m, period=50)
+
+        current_price = df_daily['Close'].iloc[-1]
 
         # ==========================================
-        # 1. STRONG UPTREND MATCH (Daily & Weekly both UP)
+        # 1. STRONG UPTREND MATCH (चारों टाइमफ्रेम UP)
         # ==========================================
-        if daily_trend == "UP" and weekly_trend == "UP":
-            current_price = df_daily['Close'].iloc[-1]
+        if monthly_trend == "UP" and weekly_trend == "UP" and daily_trend == "UP" and trend_125m == "UP":
             msg = (
-                f"🟢 *STRONG UPTREND FOUND: {name} ({symbol})* 🟢\n\n"
-                f"📈 **Daily Trend (50 SMA):** UP\n"
+                f"🟢 *QUADRUPLE UPTREND FOUND: {name} ({symbol})* 🟢\n\n"
+                f"📈 **Monthly Trend (50 SMA):** UP\n"
                 f"📈 **Weekly Trend (50 SMA):** UP\n"
+                f"📈 **Daily Trend (50 SMA):** UP\n"
+                f"📈 **125-Min Trend (50 SMA):** UP\n"
                 f"💵 **Current Price:** ₹{round(current_price, 2)}\n"
             )
             send_telegram_alert(msg)
             return True
 
         # ==========================================
-        # 2. STRONG DOWNTREND MATCH (Daily & Weekly both DOWN)
+        # 2. STRONG DOWNTREND MATCH (चारों टाइमफ्रेम DOWN)
         # ==========================================
-        elif daily_trend == "DOWN" and weekly_trend == "DOWN":
-            current_price = df_daily['Close'].iloc[-1]
+        elif monthly_trend == "DOWN" and weekly_trend == "DOWN" and daily_trend == "DOWN" and trend_125m == "DOWN":
             msg = (
-                f"🔴 *STRONG DOWNTREND FOUND: {name} ({symbol})* 🔴\n\n"
-                f"📉 **Daily Trend (50 SMA):** DOWN\n"
+                f"🔴 *QUADRUPLE DOWNTREND FOUND: {name} ({symbol})* 🔴\n\n"
+                f"📉 **Monthly Trend (50 SMA):** DOWN\n"
                 f"📉 **Weekly Trend (50 SMA):** DOWN\n"
+                f"📉 **Daily Trend (50 SMA):** DOWN\n"
+                f"📉 **125-Min Trend (50 SMA):** DOWN\n"
                 f"💵 **Current Price:** ₹{round(current_price, 2)}\n"
             )
             send_telegram_alert(msg)
@@ -170,7 +200,7 @@ def main():
         "ZENSARTECH.NS": "Zensar Technologies", "ZYDUSLIFE.NS": "Zydus Lifesciences"
     }
 
-    print("Starting 50-SMA Trend Scanner for Full 250+ Watchlist...")
+    print("Starting Quadruple Time-Frame (Monthly, Weekly, Daily, 125-Min) 50-SMA Trend Scanner...")
     total_scanned = len(watchlist)
     matched_count = 0
 
@@ -181,7 +211,7 @@ def main():
         time.sleep(1)
 
     summary_msg = (
-        "🤖 *SMA TREND SCANNER COMPLETED!*\n\n"
+        "🤖 *QUADRUPLE TIME-FRAME SCANNER COMPLETED!*\n\n"
         f"📊 **कुल स्कैन किए गए स्टॉक्स:** {total_scanned}\n"
         f"🎯 **शर्तों से मैच हुए स्टॉक्स:** {matched_count}"
     )
