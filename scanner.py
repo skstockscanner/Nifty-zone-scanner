@@ -1,3 +1,4 @@
+
 import os
 import time
 import requests
@@ -107,7 +108,7 @@ def scan_stock(symbol, name):
         monthly_trend = check_ma_trend(df_monthly, period=50)
         weekly_trend = check_ma_trend(df_weekly, period=50)
         daily_trend = check_ma_trend(df_daily, period=50)
-        trend_125m = check_125m_trend = check_ma_trend(df_125m, period=50)
+        trend_125m = check_ma_trend(df_125m, period=50)
 
         # डिमांड जोन चेक (Weekly, Daily, 125-min)
         weekly_demand = check_demand_zone(df_weekly)
@@ -154,7 +155,7 @@ def scan_stock(symbol, name):
     return False
 
 def main():
-    # आपकी पूरी 250+ स्टॉक्स की वॉचलिस्ट
+    # आपकी पूरी 250+ स्टॉक्स की वॉचलिस्ट (एरर ठीक कर दी गई है)
     watchlist = {
         "RELIANCE.NS": "Reliance Industries", "TCS.NS": "TCS", "HDFCBANK.NS": "HDFC Bank",
         "ICICIBANK.NS": "ICICI Bank", "INFY.NS": "Infosys", "BHARTIARTL.NS": "Bharti Airtel",
@@ -217,7 +218,7 @@ def main():
         "PRESTIGE.NS": "Prestige Estates", "RADICO.NS": "Radico Khaitan", "RAJESHEXPO.NS": "Rajesh Exports",
         "RALLIS.NS": "Rallis India", "RAMCOCEM.NS": "Ramco Cements", "RATNAMANI.NS": "Ratnamani Metals",
         "RAYMOND.NS": "Raymond", "RBLBANK.NS": "RBL Bank", "RAILTEL.NS": "RailTel Corporation",
-        "RELAXO.NS": "Relaxo Footwears", "RITES.NS":, "RVNL.NS": "Rail Vikas Nigam",
+        "RELAXO.NS": "Relaxo Footwears", "RITES.NS": "RITES Ltd", "RVNL.NS": "Rail Vikas Nigam",
         "SCHAEFFLER.NS": "Schaeffler India", "SCI.NS": "Shipping Corporation", "SHREECEM.NS": "Shree Cement",
         "SKFINDIA.NS": "SKF India", "SOBHA.NS": "Sobha", "SONACOMS.NS": "Sona BLW",
         "STAR.NS": "Strides Pharma", "SUMICHEM.NS": "Sumitomo Chemical", "SUNDRMFAST.NS": "Sundram Fasteners",
