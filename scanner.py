@@ -24,9 +24,8 @@ def send_telegram_alert(message):
 
 def check_ma_trend(df, period=50):
     """
-    50 कैंडल के मूविंग एवरेज (SMA) से ट्रेंड चेक करता है:
-    यदि आखिरी क्लोजिंग कीमत 50 SMA से ऊपर है -> UP
-    यदि नीचे है -> DOWN
+    मूविंग एवरेज (SMA) से ट्रेंड चेक करता है:
+    यदि आखिरी क्लोजिंग कीमत 50 SMA से ऊपर है -> UP, नीचे है -> DOWN
     """
     if len(df) < period:
         return "SIDEWAYS"
@@ -44,6 +43,31 @@ def check_ma_trend(df, period=50):
     elif last_close < last_sma:
         return "DOWN"
     return "SIDEWAYS"
+
+def check_demand_zone(df, tolerance=0.015):
+    """
+    प्राइस एक्शन के आधार पर डिमांड जोन (Swing Low / Support Base) की जांच करता है।
+    देखता है कि क्या करंट प्राइस किसी हालिया डिमांड जोन / स्विंग लो के पास है।
+    """
+    if len(df) < 20:
+        return False
+    
+    # हाल के स्विंग लो (Demand Zones) निकालना
+    df_copy = df.copy()
+    df_copy['Min_Low'] = df_copy['Low'].rolling(window=5, center=True).min()
+    swing_lows = df_copy[df_copy['Low'] == df_copy['Min_Low']]['Low'].tolist()
+    
+    if not swing_lows:
+        return False
+    
+    current_price = df['Close'].iloc[-1]
+    
+    # चेक करें कि क्या करंट प्राइस हाल के किसी डिमांड जोन (स्विंग लो) के पास (±1.5%) या थोड़ा ऊपर है
+    for zone_price in swing_lows[-3:]:  # आखिरी 3 स्विंग लो चेक करें
+        if (zone_price * (1 - tolerance)) <= current_price <= (zone_price * (1 + 0.03)):
+            return True
+            
+    return False
 
 def get_125min_df(ticker):
     try:
@@ -79,38 +103,46 @@ def scan_stock(symbol, name):
             len(df_monthly) < 50 or len(df_weekly) < 50 or len(df_daily) < 50 or len(df_125m) < 50):
             return False
 
+        # ट्रेंड चेक
         monthly_trend = check_ma_trend(df_monthly, period=50)
         weekly_trend = check_ma_trend(df_weekly, period=50)
         daily_trend = check_ma_trend(df_daily, period=50)
-        trend_125m = check_ma_trend(df_125m, period=50)
+        trend_125m = check_125m_trend = check_ma_trend(df_125m, period=50)
+
+        # डिमांड जोन चेक (Weekly, Daily, 125-min)
+        weekly_demand = check_demand_zone(df_weekly)
+        daily_demand = check_demand_zone(df_daily)
+        demand_125m = check_demand_zone(df_125m)
 
         current_price = df_daily['Close'].iloc[-1]
 
         # ==========================================
-        # 1. STRONG UPTREND MATCH (चारों टाइमफ्रेम UP)
+        # 1. UPTREND + DEMAND ZONE MATCH
         # ==========================================
-        if monthly_trend == "UP" and weekly_trend == "UP" and daily_trend == "UP" and trend_125m == "UP":
+        if (monthly_trend == "UP" and weekly_trend == "UP" and daily_trend == "UP" and trend_125m == "UP" and
+            weekly_demand and daily_demand and demand_125m):
             msg = (
-                f"🟢 *QUADRUPLE UPTREND FOUND: {name} ({symbol})* 🟢\n\n"
-                f"📈 **Monthly Trend (50 SMA):** UP\n"
-                f"📈 **Weekly Trend (50 SMA):** UP\n"
-                f"📈 **Daily Trend (50 SMA):** UP\n"
-                f"📈 **125-Min Trend (50 SMA):** UP\n"
+                f"🟢 *DEMAND ZONE + UPTREND FOUND: {name} ({symbol})* 🟢\n\n"
+                f"📈 **Trends (50 SMA):** All UP (Monthly, Weekly, Daily, 125M)\n"
+                f"🎯 **Weekly Demand Zone:** Active / Tested\n"
+                f"🎯 **Daily Demand Zone:** Active / Tested\n"
+                f"🎯 **125-Min Demand Zone:** Active / Tested\n"
                 f"💵 **Current Price:** ₹{round(current_price, 2)}\n"
             )
             send_telegram_alert(msg)
             return True
 
         # ==========================================
-        # 2. STRONG DOWNTREND MATCH (चारों टाइमफ्रेम DOWN)
+        # 2. DOWNTREND + SUPPLY/DEMAND ZONE MATCH
         # ==========================================
-        elif monthly_trend == "DOWN" and weekly_trend == "DOWN" and daily_trend == "DOWN" and trend_125m == "DOWN":
+        elif (monthly_trend == "DOWN" and weekly_trend == "DOWN" and daily_trend == "DOWN" and trend_125m == "DOWN" and
+              weekly_demand and daily_demand and demand_125m):
             msg = (
-                f"🔴 *QUADRUPLE DOWNTREND FOUND: {name} ({symbol})* 🔴\n\n"
-                f"📉 **Monthly Trend (50 SMA):** DOWN\n"
-                f"📉 **Weekly Trend (50 SMA):** DOWN\n"
-                f"📉 **Daily Trend (50 SMA):** DOWN\n"
-                f"📉 **125-Min Trend (50 SMA):** DOWN\n"
+                f"🔴 *DEMAND ZONE + DOWNTREND FOUND: {name} ({symbol})* 🔴\n\n"
+                f"📉 **Trends (50 SMA):** All DOWN (Monthly, Weekly, Daily, 125M)\n"
+                f"🎯 **Weekly Demand Zone:** Active / Tested\n"
+                f"🎯 **Daily Demand Zone:** Active / Tested\n"
+                f"🎯 **125-Min Demand Zone:** Active / Tested\n"
                 f"💵 **Current Price:** ₹{round(current_price, 2)}\n"
             )
             send_telegram_alert(msg)
@@ -122,7 +154,7 @@ def scan_stock(symbol, name):
     return False
 
 def main():
-    # पूरी 250+ स्टॉक्स की वॉचलिस्ट
+    # आपकी पूरी 250+ स्टॉक्स की वॉचलिस्ट
     watchlist = {
         "RELIANCE.NS": "Reliance Industries", "TCS.NS": "TCS", "HDFCBANK.NS": "HDFC Bank",
         "ICICIBANK.NS": "ICICI Bank", "INFY.NS": "Infosys", "BHARTIARTL.NS": "Bharti Airtel",
@@ -164,8 +196,7 @@ def main():
         "CANFINHOME.NS": "Can Fin Homes", "CARBORUNIV.NS": "Carborundum", "CASTROLIND.NS": "Castrol",
         "CEATLTD.NS": "CEAT", "CESC.NS": "CESC", "CHAMBLFERT.NS": "Chambal Fert",
         "CUMMINSIND.NS": "Cummins", "CYIENT.NS": "Cyient", "DEEPAKNTR.NS": "Deepak Nitrite",
-        "DEVYANI.NS": "Devyani",
-        "ESCORTS.NS": "Escorts Kubota", "EXIDEIND.NS": "Exide Industries",
+        "DEVYANI.NS": "Devyani", "ESCORTS.NS": "Escorts Kubota", "EXIDEIND.NS": "Exide Industries",
         "FEDERALBNK.NS": "Federal Bank", "FINCABLES.NS": "Finolex Cables", "FINPIPE.NS": "Finolex Industries",
         "FORTIS.NS": "Fortis Healthcare", "GLENMARK.NS": "Glenmark Pharma", "GMDC.NS": "Gujarat Mineral",
         "GNFC.NS": "GNFC", "GODREJIND.NS": "Godrej Industries", "GRANULES.NS": "Granules India",
@@ -186,7 +217,7 @@ def main():
         "PRESTIGE.NS": "Prestige Estates", "RADICO.NS": "Radico Khaitan", "RAJESHEXPO.NS": "Rajesh Exports",
         "RALLIS.NS": "Rallis India", "RAMCOCEM.NS": "Ramco Cements", "RATNAMANI.NS": "Ratnamani Metals",
         "RAYMOND.NS": "Raymond", "RBLBANK.NS": "RBL Bank", "RAILTEL.NS": "RailTel Corporation",
-        "RELAXO.NS": "Relaxo Footwears", "RITES.NS": "RITES", "RVNL.NS": "Rail Vikas Nigam",
+        "RELAXO.NS": "Relaxo Footwears", "RITES.NS":, "RVNL.NS": "Rail Vikas Nigam",
         "SCHAEFFLER.NS": "Schaeffler India", "SCI.NS": "Shipping Corporation", "SHREECEM.NS": "Shree Cement",
         "SKFINDIA.NS": "SKF India", "SOBHA.NS": "Sobha", "SONACOMS.NS": "Sona BLW",
         "STAR.NS": "Strides Pharma", "SUMICHEM.NS": "Sumitomo Chemical", "SUNDRMFAST.NS": "Sundram Fasteners",
@@ -200,7 +231,7 @@ def main():
         "ZENSARTECH.NS": "Zensar Technologies", "ZYDUSLIFE.NS": "Zydus Lifesciences"
     }
 
-    print("Starting Quadruple Time-Frame (Monthly, Weekly, Daily, 125-Min) 50-SMA Trend Scanner...")
+    print("Starting Trend + Demand Zone Scanner...")
     total_scanned = len(watchlist)
     matched_count = 0
 
@@ -211,7 +242,7 @@ def main():
         time.sleep(1)
 
     summary_msg = (
-        "🤖 *QUADRUPLE TIME-FRAME SCANNER COMPLETED!*\n\n"
+        "🤖 *TREND + DEMAND ZONE SCANNER COMPLETED!*\n\n"
         f"📊 **कुल स्कैन किए गए स्टॉक्स:** {total_scanned}\n"
         f"🎯 **शर्तों से मैच हुए स्टॉक्स:** {matched_count}"
     )
